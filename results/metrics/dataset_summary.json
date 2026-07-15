@@ -1,0 +1,47 @@
+{
+    "dataset_file": "C:\\Users\\neera\\Desktop\\ai-security-copilot\\data\\raw\\train-00000-of-00001.parquet",
+    "total_samples": 21854,
+    "schema": {
+        "columns": [
+            "id",
+            "func",
+            "target",
+            "project",
+            "commit_id"
+        ],
+        "detected_source_column": "func",
+        "detected_label_column": "target"
+    },
+    "quality_checks": {
+        "is_binary_valid": true,
+        "missing_values": {
+            "source_code": 0,
+            "label": 0
+        },
+        "empty_source_code_samples": 0,
+        "total_duplicate_code_samples": 46,
+        "exact_duplicates": 0,
+        "conflicting_duplicates": {
+            "unique_conflicting_codes": 46,
+            "conflicting_samples": 92
+        }
+    },
+    "class_distribution": {
+        "non_vulnerable": {
+            "count": 11836,
+            "percentage": 54.159421616180104
+        },
+        "vulnerable": {
+            "count": 10018,
+            "percentage": 45.840578383819896
+        },
+        "invalid_or_missing_label": 0
+    },
+    "code_length_statistics": {
+        "min_chars": 26,
+        "max_chars": 142346,
+        "mean_chars": 2031.3815777432048,
+        "median_chars": 934.5,
+        "std_dev_chars": 4578.833517727042
+    }
+}

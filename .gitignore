@@ -1,0 +1,102 @@
+# AI Security Copilot — .gitignore
+
+# =====================================================
+# Python
+# =====================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+*.pdb
+*.egg
+*.egg-info/
+dist/
+build/
+wheels/
+.eggs/
+*.dist-info/
+
+# =====================================================
+# Virtual Environments
+# =====================================================
+.venv/
+venv/
+env/
+ENV/
+
+# =====================================================
+# Testing / Coverage
+# =====================================================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.coveragerc
+
+# =====================================================
+# IDE and Editor Files
+# =====================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# =====================================================
+# Environment Files (contain secrets)
+# =====================================================
+.env
+.env.local
+.env.production
+*.env
+
+# =====================================================
+# Model Checkpoints (large files)
+# =====================================================
+# Exclude fully-trained large checkpoints from git
+# but keep demo checkpoint and .gitkeep
+models/checkpoints/best_model.pt
+models/checkpoints/latest_checkpoint.pt
+models/saved/*.pt
+models/saved/*.bin
+
+# HuggingFace model cache (very large)
+.cache/huggingface/
+~/.cache/huggingface/
+
+# =====================================================
+# Data Files
+# =====================================================
+# Exclude datasets and intermediate processing files
+data/raw/
+data/processed/
+data/cpg_files/
+
+# =====================================================
+# Results and Outputs
+# =====================================================
+results/figures/*.png
+results/metrics/training_history.json
+
+# =====================================================
+# Logs
+# =====================================================
+*.log
+logs/
+
+# =====================================================
+# Notebooks
+# =====================================================
+notebooks/.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# =====================================================
+# Temporary Files
+# =====================================================
+*.tmp
+*.temp
+tmp/
+temp/

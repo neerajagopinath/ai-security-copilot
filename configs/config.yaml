@@ -1,0 +1,47 @@
+# Configuration settings for AI Security Copilot
+
+project:
+  name: "ai-security-copilot"
+  seed: 42
+
+paths:
+  raw_data_dir: "data/raw"
+  processed_data_dir: "data/processed"
+  checkpoints_dir: "models/checkpoints"
+  saved_models_dir: "models/saved"
+  figures_dir: "results/figures"
+  metrics_dir: "results/metrics"
+
+training:
+  batch_size: 64
+  epochs: 10
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  device: "cuda"  # Options: "cuda", "cpu"
+  val_split: 0.1
+  test_split: 0.1
+  clip_grad_norm: 5.0
+  early_stopping_patience: 3
+  decision_threshold: 0.5
+  num_workers: 0
+  scheduler_patience: 1
+  scheduler_factor: 0.5
+
+models:
+  bilstm:
+    vocab_size: 10000
+    embedding_dim: 128
+    hidden_dim: 256
+    num_layers: 2
+    dropout: 0.5
+    bidirectional: true
+  
+  graphcodebert:
+    model_name: "microsoft/graphcodebert-base"
+    max_sequence_length: 512
+    fine_tune_epochs: 3
+    learning_rate: 0.00002
+
+fastapi:
+  host: "127.0.0.1"
+  port: 8000
