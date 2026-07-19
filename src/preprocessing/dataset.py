@@ -1,6 +1,7 @@
 import torch
-from torch.utils.data import Dataset, DataLoader
-from typing import List, Dict, Any
+from torch.utils.data import Dataset, DataLoader, Sampler
+import random
+from typing import List, Dict, Any, Iterator
 
 class VulnerabilityDataset(Dataset):
     """
@@ -21,19 +22,71 @@ class VulnerabilityDataset(Dataset):
             raise ValueError(
                 f"Mismatch in sizes: sequences={len(sequences)}, labels={len(labels)}, lengths={len(lengths)}"
             )
-        self.sequences = sequences
-        self.labels = labels
-        self.lengths = lengths
+        self.sequences = torch.tensor(sequences, dtype=torch.long)
+        self.labels = torch.tensor(labels, dtype=torch.float)
+        self.lengths = torch.tensor(lengths, dtype=torch.long)
 
     def __len__(self) -> int:
         return len(self.sequences)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         return {
-            "input_ids": torch.tensor(self.sequences[idx], dtype=torch.long),
-            "label": torch.tensor(self.labels[idx], dtype=torch.float),
-            "length": torch.tensor(self.lengths[idx], dtype=torch.long)
+            "input_ids": self.sequences[idx],
+            "label": self.labels[idx],
+            "length": self.lengths[idx]
         }
+
+def sorted_collate_fn(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+    """
+    Collates a list of dataset elements into a batch and sorts by length descending.
+    This eliminates the sorting overhead in PyTorch's pack_padded_sequence (enforce_sorted=False).
+    Additionally dynamically truncates the input_ids to the max length in the batch.
+    """
+    # Sort batch by length descending
+    batch.sort(key=lambda x: x["length"].item(), reverse=True)
+    
+    input_ids = torch.stack([x["input_ids"] for x in batch])
+    labels = torch.stack([x["label"] for x in batch])
+    lengths = torch.stack([x["length"] for x in batch])
+    
+    # Dynamic padding: truncate to max length in this batch
+    max_len = lengths[0].item()  # Since it's sorted, first element has max length
+    input_ids = input_ids[:, :max_len]
+    
+    return {
+        "input_ids": input_ids,
+        "label": labels,
+        "length": lengths
+    }
+
+class BucketBatchSampler(Sampler):
+    """
+    Groups sequences of similar lengths into batches to minimize padding waste.
+    """
+    def __init__(self, lengths: torch.Tensor, batch_size: int, shuffle: bool = True):
+        self.lengths = lengths.tolist()
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+
+    def __iter__(self) -> Iterator[List[int]]:
+        # Create list of indices
+        indices = list(range(len(self.lengths)))
+        
+        # Sort indices by sequence length
+        indices.sort(key=lambda i: self.lengths[i])
+        
+        # Group into batches
+        batches = [indices[i:i + self.batch_size] for i in range(0, len(indices), self.batch_size)]
+        
+        # Shuffle the batches if required
+        if self.shuffle:
+            random.shuffle(batches)
+            
+        for batch in batches:
+            yield batch
+
+    def __len__(self) -> int:
+        return (len(self.lengths) + self.batch_size - 1) // self.batch_size
 
 def get_dataloader(dataset: VulnerabilityDataset, 
                    batch_size: int = 64, 
@@ -51,10 +104,12 @@ def get_dataloader(dataset: VulnerabilityDataset,
     Returns:
         DataLoader: PyTorch DataLoader instance.
     """
+    batch_sampler = BucketBatchSampler(dataset.lengths, batch_size=batch_size, shuffle=shuffle)
+    
     return DataLoader(
         dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
+        batch_sampler=batch_sampler,
         num_workers=num_workers,
+        collate_fn=sorted_collate_fn,
         pin_memory=True if torch.cuda.is_available() else False
     )

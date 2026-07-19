@@ -149,6 +149,46 @@ st.markdown("""
         font-size: 0.88rem;
         color: #fbbf24;
     }
+    
+    /* Finding cards */
+    .finding-card {
+        background: rgba(30, 41, 59, 0.5);
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 0.75rem;
+    }
+    .finding-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+    }
+    .finding-title {
+        font-weight: 600;
+        font-size: 1.05rem;
+        color: #e2e8f0;
+    }
+    .finding-meta {
+        font-size: 0.85rem;
+        color: #94a3b8;
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 0.5rem;
+    }
+    .finding-desc {
+        font-size: 0.9rem;
+        color: #cbd5e1;
+        margin-bottom: 0.5rem;
+    }
+    .finding-rec {
+        font-size: 0.9rem;
+        color: #bae6fd;
+        background: rgba(56,189,248,0.06);
+        padding: 0.5rem;
+        border-left: 2px solid #38bdf8;
+        border-radius: 4px;
+    }
 
     /* Recommendation items */
     .rec-item {
@@ -388,6 +428,7 @@ if analyze_clicked:
                     explanation = result.get("explanation", "")
                     recommendations = result.get("recommendations", [])
                     suggested_code = result.get("suggested_code", "")
+                    structured_findings = result.get("structured_findings", [])
                     disclaimer = result.get("disclaimer", "")
                     model_mode = result.get("model_mode", "fallback")
 
@@ -451,7 +492,33 @@ if analyze_clicked:
                     ])
 
                     with tab1:
-                        if patterns:
+                        if structured_findings:
+                            st.markdown(
+                                f'<div style="color:#94a3b8; font-size:0.9rem; margin-bottom:0.75rem;">'
+                                f'Found <strong>{len(structured_findings)}</strong> security finding(s):</div>',
+                                unsafe_allow_html=True,
+                            )
+                            for finding in structured_findings:
+                                severity = finding.get("severity", "Unknown")
+                                badge_col = "badge-red" if severity == "High" else "badge-yellow" if severity == "Medium" else "badge-blue"
+                                
+                                st.markdown(f"""
+                                <div class="finding-card">
+                                    <div class="finding-header">
+                                        <div class="finding-title">⚠️ {finding.get('type', 'Unknown Pattern')}</div>
+                                        <div class="metric-badge {badge_col}">Severity: {severity}</div>
+                                    </div>
+                                    <div class="finding-meta">
+                                        <span><strong>Line:</strong> {finding.get('line', 'N/A')}</span>
+                                        <span><strong>CWE:</strong> {finding.get('cwe', 'N/A')}</span>
+                                        <span><strong>OWASP:</strong> {finding.get('owasp', 'N/A')}</span>
+                                    </div>
+                                    <div class="finding-desc">{finding.get('reason', '')}</div>
+                                    <div class="finding-rec">💡 <strong>Recommendation:</strong> {finding.get('recommendation', '')}</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                        elif patterns:
+                            # Fallback for old API response (if needed)
                             st.markdown(
                                 f'<div style="color:#94a3b8; font-size:0.9rem; margin-bottom:0.75rem;">'
                                 f'Found <strong>{len(patterns)}</strong> security pattern(s):</div>',

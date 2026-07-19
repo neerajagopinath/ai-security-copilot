@@ -31,6 +31,8 @@ SECURITY_PATTERNS = [
         "unsafe_memory_op",
         "Unsafe memory operation detected (memcpy/malloc/free family)",
         "Potential Memory Safety Issue",
+        "High", "CWE-119", "A08:2021-Software and Data Integrity Failures",
+        "Always validate malloc/calloc return values for NULL and ensure bounds checking before memory copy."
     ),
     # Buffer copy without bounds
     (
@@ -38,6 +40,8 @@ SECURITY_PATTERNS = [
         "unsafe_string_op",
         "Unsafe string function without bounds checking (strcpy/strcat/sprintf/gets)",
         "Possible Buffer Overflow Risk",
+        "High", "CWE-120", "A03:2021-Injection",
+        "Replace unsafe string functions with bounds-checked alternatives: strncpy, strncat, snprintf, fgets."
     ),
     # Safer alternatives that are still worth noting
     (
@@ -45,6 +49,8 @@ SECURITY_PATTERNS = [
         "bounded_string_op",
         "Bounded string function used (strncpy/snprintf) — verify size parameter",
         "Possible Off-by-One Risk",
+        "Low", "CWE-193", "A03:2021-Injection",
+        "Ensure the size parameter correctly accounts for the null terminator to prevent off-by-one errors."
     ),
     # Command execution
     (
@@ -52,6 +58,8 @@ SECURITY_PATTERNS = [
         "command_execution",
         "Command execution function detected (system/exec family)",
         "Possible Command Injection Risk",
+        "High", "CWE-78", "A03:2021-Injection",
+        "Avoid passing user-controlled input to system()/exec() without strict allowlist validation."
     ),
     # SQL string construction
     (
@@ -59,6 +67,8 @@ SECURITY_PATTERNS = [
         "sql_injection",
         "Potential SQL query string construction detected",
         "Possible SQL Injection Risk",
+        "High", "CWE-89", "A03:2021-Injection",
+        "Use parameterized queries or prepared statements instead of building SQL strings through concatenation."
     ),
     # Hard-coded credentials
     (
@@ -66,6 +76,8 @@ SECURITY_PATTERNS = [
         "hardcoded_credential",
         "Possible hard-coded credential or secret detected",
         "Possible Hard-coded Secret",
+        "High", "CWE-798", "A07:2021-Identification and Authentication Failures",
+        "Remove hard-coded credentials. Use environment variables or secure secrets managers."
     ),
     # Weak cryptography
     (
@@ -73,6 +85,8 @@ SECURITY_PATTERNS = [
         "weak_crypto",
         "Weak or deprecated cryptographic algorithm reference",
         "Possible Weak Cryptography",
+        "Medium", "CWE-327", "A02:2021-Cryptographic Failures",
+        "Replace weak cryptographic algorithms (MD5, SHA-1, DES) with modern standards (SHA-256, AES-GCM)."
     ),
     # Integer overflow indicators
     (
@@ -80,6 +94,8 @@ SECURITY_PATTERNS = [
         "integer_boundary",
         "Integer boundary constant usage — verify overflow handling",
         "Possible Integer Overflow/Underflow Risk",
+        "Low", "CWE-190", "A03:2021-Injection",
+        "Ensure arithmetic operations on integers do not result in overflow or underflow."
     ),
     # Null pointer dereference risk
     (
@@ -87,6 +103,8 @@ SECURITY_PATTERNS = [
         "null_ptr_risk",
         "malloc() return value may not be checked for NULL",
         "Possible Null Pointer Dereference",
+        "Medium", "CWE-476", "A08:2021-Software and Data Integrity Failures",
+        "Always check the return value of malloc()/calloc() for NULL before use."
     ),
     # Format string
     (
@@ -94,6 +112,8 @@ SECURITY_PATTERNS = [
         "format_string",
         "Possible format string vulnerability — user input as format argument",
         "Possible Format String Vulnerability",
+        "High", "CWE-134", "A03:2021-Injection",
+        "Never pass user-controlled strings directly as format arguments. Use printf(\"%s\", input)."
     ),
     # Dangerous file operations
     (
@@ -101,6 +121,8 @@ SECURITY_PATTERNS = [
         "file_operation",
         "File operation detected — verify path validation and permissions",
         "Possible Insecure File Operation",
+        "Medium", "CWE-22", "A01:2021-Broken Access Control",
+        "Validate and canonicalize file paths before use. Restrict file access."
     ),
     # Missing input validation (common patterns)
     (
@@ -108,13 +130,17 @@ SECURITY_PATTERNS = [
         "unvalidated_input",
         "String-to-integer conversion without validation (atoi/atol/atof)",
         "Possible Missing Input Validation",
+        "Low", "CWE-20", "A03:2021-Injection",
+        "Validate input before conversion. Consider using strtol() with error checking."
     ),
-    # Use after free pattern hint (simplified — no backreference)
+    # Use after free pattern hint
     (
         re.compile(r'free\s*\([^)]+\)\s*;[^;]{0,80}?(?:->|\[|\.)'),
         "use_after_free_hint",
         "Possible use-after-free pattern (pointer dereferenced after free())",
         "Possible Use-After-Free Risk",
+        "High", "CWE-416", "A08:2021-Software and Data Integrity Failures",
+        "Set pointers to NULL immediately after freeing them to prevent use-after-free."
     ),
 ]
 
@@ -125,6 +151,11 @@ class RuleMatch:
     description: str
     hedged_category: str
     matched_text: str
+    severity: str
+    line_number: int
+    cwe: str
+    owasp: str
+    recommendation: str
 
 
 @dataclass
@@ -148,6 +179,7 @@ class AnalysisResult:
     potential_category: str = "Unknown"
     explanation: str = ""
     recommendations: List[str] = field(default_factory=list)
+    structured_findings: List[Dict[str, Any]] = field(default_factory=list)
     suggested_code: str = ""
     disclaimer: str = ""
 
@@ -162,16 +194,21 @@ def run_rule_analysis(code: str) -> List[RuleMatch]:
     Returns a list of RuleMatch objects for each detected pattern.
     """
     matches = []
-    for pattern, name, description, category in SECURITY_PATTERNS:
-        found = pattern.search(code)
-        if found:
+    for pattern, name, description, category, severity, cwe, owasp, rec in SECURITY_PATTERNS:
+        for found in pattern.finditer(code):
             matched_text = found.group(0)[:100]  # cap at 100 chars
+            line_number = code[:found.start()].count('\n') + 1
             matches.append(
                 RuleMatch(
                     pattern_name=name,
                     description=description,
                     hedged_category=category,
                     matched_text=matched_text,
+                    severity=severity,
+                    line_number=line_number,
+                    cwe=cwe,
+                    owasp=owasp,
+                    recommendation=rec,
                 )
             )
     return matches
@@ -417,7 +454,20 @@ class SecurityAnalysisService:
         # 7. Recommendations
         recommendations = build_recommendations(rule_matches, prediction)
 
-        # 8. Suggested code
+        # 8. Structured Findings
+        structured_findings = []
+        for m in rule_matches:
+            structured_findings.append({
+                "type": m.hedged_category,
+                "severity": m.severity,
+                "line": m.line_number,
+                "cwe": m.cwe,
+                "owasp": m.owasp,
+                "reason": m.description,
+                "recommendation": m.recommendation
+            })
+
+        # 9. Suggested code
         suggested_code = generate_suggested_code(code, rule_matches)
 
         return {
@@ -432,6 +482,7 @@ class SecurityAnalysisService:
             "rule_matches_count": len(rule_matches),
             "explanation": explanation,
             "recommendations": recommendations,
+            "structured_findings": structured_findings,
             "suggested_code": suggested_code,
             "disclaimer": self.DISCLAIMER,
         }
@@ -521,6 +572,7 @@ class SecurityAnalysisService:
             "rule_matches_count": 0,
             "explanation": "No source code was provided for analysis.",
             "recommendations": ["Please provide valid source code for analysis."],
+            "structured_findings": [],
             "suggested_code": "",
             "disclaimer": self.DISCLAIMER,
         }

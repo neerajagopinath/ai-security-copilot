@@ -171,6 +171,16 @@ class PredictResponse(BaseModel):
     model_mode: str
 
 
+class StructuredFinding(BaseModel):
+    type: str
+    severity: str
+    line: int
+    cwe: str
+    owasp: str
+    reason: str
+    recommendation: str
+
+
 class AnalyzeResponse(BaseModel):
     model: str
     language: str
@@ -183,6 +193,7 @@ class AnalyzeResponse(BaseModel):
     rule_matches_count: int
     explanation: str
     recommendations: List[str]
+    structured_findings: List[StructuredFinding]
     suggested_code: str
     disclaimer: str
 

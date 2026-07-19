@@ -123,7 +123,7 @@ def test_dataset_and_dataloader():
     # Test DataLoader
     loader = get_dataloader(dataset, batch_size=2, shuffle=False)
     for batch in loader:
-        assert batch["input_ids"].shape == (2, 5)
+        assert batch["input_ids"].shape == (2, 4)
         assert batch["label"].shape == (2,)
         assert batch["length"].tolist() == [4, 4]
 

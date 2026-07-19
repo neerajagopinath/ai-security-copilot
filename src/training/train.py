@@ -6,6 +6,7 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
+from pathlib import Path
 import matplotlib
 # Use non-interactive backend for Matplotlib to avoid Tkinter display issues
 matplotlib.use('Agg')
@@ -92,11 +93,20 @@ def plot_curves(history: list[dict], figures_dir: str) -> None:
 def main():
     args = parse_args()
     
+    # Resolve absolute project root so all paths are correct regardless of CWD.
+    # train.py lives at <project_root>/src/training/train.py  -> .parent.parent.parent
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+    
     # 1. Load project configurations
-    if not os.path.exists(args.config):
-        raise FileNotFoundError(f"Configuration file not found at: {args.config}")
-    with open(args.config, "r") as f:
+    config_path = PROJECT_ROOT / args.config
+    if not config_path.exists():
+        raise FileNotFoundError(f"Configuration file not found at: {config_path}")
+    with open(config_path, "r") as f:
         config = yaml.safe_load(f)
+    
+    # Resolve every config path to an absolute location anchored at PROJECT_ROOT
+    for key in config.get("paths", {}):
+        config["paths"][key] = str(PROJECT_ROOT / config["paths"][key])
         
     # Merge CLI Overrides
     epochs = args.epochs if args.epochs is not None else config["training"]["epochs"]
@@ -113,6 +123,15 @@ def main():
         if device_name == "cuda":
             print("[Warning] CUDA was requested but is not available on this hardware. Defaulting to CPU.")
         device = torch.device("cpu")
+        
+        # Optimize CPU threads for RNN workloads (prevents severe OpenMP thread contention slowdowns)
+        try:
+            import multiprocessing
+            cpu_count = multiprocessing.cpu_count()
+            threads = min(8, max(2, cpu_count // 2))
+            torch.set_num_threads(threads)
+        except Exception:
+            torch.set_num_threads(4)
         
     print(f"\nTraining Configured Device: {device.type.upper()}")
     if device.type == "cuda":
@@ -237,7 +256,7 @@ def main():
             lengths = batch["length"]  # CPU tensor
             targets = batch["label"].to(device)
             
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             
             # Forward
             logits = model(input_ids, lengths).squeeze(-1)
@@ -271,15 +290,15 @@ def main():
                 
                 val_loss += loss.item() * input_ids.size(0)
                 
-                # Squeeze outputs and move to CPU
-                all_targets.extend(targets.cpu().numpy())
-                all_logits.extend(logits.cpu().numpy())
+                # Keep on device, just append to list
+                all_targets.append(targets)
+                all_logits.append(logits)
                 
         epoch_val_loss = val_loss / len(val_loader.dataset)
         
-        # Calculate metrics
-        y_true = np.array(all_targets)
-        y_pred_logits = np.array(all_logits)
+        # Calculate metrics efficiently: concatenate once, then move to CPU
+        y_true = torch.cat(all_targets).cpu().numpy()
+        y_pred_logits = torch.cat(all_logits).cpu().numpy()
         metrics = compute_classification_metrics(y_true, y_pred_logits, threshold=config["training"]["decision_threshold"])
         
         val_acc = metrics["accuracy"]

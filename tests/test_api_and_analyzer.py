@@ -162,7 +162,10 @@ class TestRuleAnalysis:
     def test_derive_category(self):
         from src.inference.security_analyzer import derive_category_from_rules, RuleMatch
         matches = [
-            RuleMatch("command_execution", "desc", "Possible Command Injection Risk", "cmd"),
+            RuleMatch(
+                "command_execution", "desc", "Possible Command Injection Risk", "cmd",
+                severity="High", line_number=10, cwe="CWE-78", owasp="A03", recommendation="Fix it"
+            ),
         ]
         cat = derive_category_from_rules(matches)
         assert "Command" in cat or "command" in cat.lower()
@@ -170,7 +173,10 @@ class TestRuleAnalysis:
     def test_recommendations_generated(self):
         from src.inference.security_analyzer import build_recommendations, RuleMatch
         matches = [
-            RuleMatch("unsafe_string_op", "desc", "cat", "strcpy"),
+            RuleMatch(
+                "unsafe_string_op", "desc", "cat", "strcpy",
+                severity="High", line_number=12, cwe="CWE-120", owasp="A03", recommendation="Use strncpy"
+            ),
         ]
         recs = build_recommendations(matches, "Potentially Vulnerable")
         assert len(recs) >= 1
@@ -267,7 +273,7 @@ class TestDemoCheckpoint:
         """Demo checkpoint must load with no RuntimeError (no size mismatch)."""
         from src.inference.model_manager import ModelManager
         mgr = ModelManager()
-        mgr.load_bilstm()
+        mgr.load_bilstm(checkpoint_path=_DEMO_CKPT)
         assert mgr.bilstm_model is not None, (
             "Model is None — checkpoint loading failed. Check logs for size mismatch."
         )
@@ -279,7 +285,7 @@ class TestDemoCheckpoint:
         """Demo checkpoint must NOT report status='trained'."""
         from src.inference.model_manager import ModelManager
         mgr = ModelManager()
-        mgr.load_bilstm()
+        mgr.load_bilstm(checkpoint_path=_DEMO_CKPT)
         assert mgr.bilstm_status != "trained"
         assert mgr.bilstm_status != "fallback"
 
@@ -287,7 +293,7 @@ class TestDemoCheckpoint:
         """Architecture dims must match the smoke-test values (not config.yaml defaults)."""
         from src.inference.model_manager import ModelManager
         mgr = ModelManager()
-        mgr.load_bilstm()
+        mgr.load_bilstm(checkpoint_path=_DEMO_CKPT)
         assert mgr.bilstm_arch is not None
         arch = mgr.bilstm_arch
         # Smoke test used embedding_dim=64, hidden_dim=128 — NOT config defaults (128, 256)
@@ -321,7 +327,7 @@ class TestDemoCheckpoint:
         """Inference must report mode='demo', not 'fallback' or 'trained'."""
         from src.inference.model_manager import ModelManager
         mgr = ModelManager()
-        mgr.load_bilstm()
+        mgr.load_bilstm(checkpoint_path=_DEMO_CKPT)
         result = mgr._predict_bilstm("void f() { gets(buf); }")
         assert result["mode"] == "demo"
 
@@ -330,7 +336,7 @@ class TestDemoCheckpoint:
         from src.inference.model_manager import ModelManager
         from src.inference.security_analyzer import SecurityAnalysisService
         mgr = ModelManager()
-        mgr.load_bilstm()
+        mgr.load_bilstm(checkpoint_path=_DEMO_CKPT)
         svc = SecurityAnalysisService(model_manager=mgr)
         result = svc.analyze(
             "void f() { char buf[64]; strcpy(buf, input); }",
@@ -344,7 +350,7 @@ class TestDemoCheckpoint:
         """get_status() must report demo+loaded=True after successful checkpoint load."""
         from src.inference.model_manager import ModelManager
         mgr = ModelManager()
-        mgr.load_bilstm()
+        mgr.load_bilstm(checkpoint_path=_DEMO_CKPT)
         status = mgr.get_status()
         assert status["bilstm"]["status"] == "demo"
         assert status["bilstm"]["loaded"] is True

@@ -107,10 +107,17 @@ class ModelManager:
     # Bi-LSTM loading
     # ------------------------------------------------------------------
 
-    def load_bilstm(self) -> None:
+    def load_bilstm(self, checkpoint_path: Optional[str] = None) -> None:
         """
         Attempt to load the Bi-LSTM model.
         Priority: best_model.pt > demo_bilstm_model.pt > fallback
+
+        Args:
+            checkpoint_path: Optional explicit path to a checkpoint file.
+                             When provided, skips auto-discovery and loads
+                             this file directly. Status is inferred from the
+                             filename ('demo' if the name contains 'demo',
+                             otherwise 'trained').
 
         Architecture parameters are read DIRECTLY from the checkpoint's
         state-dict tensor shapes. The config.yaml values are NOT used
@@ -128,10 +135,19 @@ class ModelManager:
             self.bilstm_vocab = json.load(f)
 
         # ── 2. Locate checkpoint ──────────────────────────────────────────
-        checkpoint_path = None
         status = "fallback"
 
-        if os.path.exists(BEST_CHECKPOINT_PATH):
+        if checkpoint_path is not None:
+            # Explicit path provided — use it directly
+            if not os.path.exists(checkpoint_path):
+                logger.warning("Explicit checkpoint not found at %s. Falling back.", checkpoint_path)
+                self.bilstm_status = "fallback"
+                return
+            # Infer status from filename: 'demo' if 'demo' in the filename
+            fname = os.path.basename(checkpoint_path).lower()
+            status = "demo" if "demo" in fname else "trained"
+            logger.info("Using explicit checkpoint: %s  (status=%s)", checkpoint_path, status)
+        elif os.path.exists(BEST_CHECKPOINT_PATH):
             checkpoint_path = BEST_CHECKPOINT_PATH
             status = "trained"
             logger.info("Found best model checkpoint: %s", BEST_CHECKPOINT_PATH)
@@ -149,6 +165,7 @@ class ModelManager:
             )
             self.bilstm_status = "fallback"
             return
+
 
         # ── 3. Load raw checkpoint from disk ─────────────────────────────
         try:
