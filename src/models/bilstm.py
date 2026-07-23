@@ -108,7 +108,7 @@ class BiLSTMVulnerabilityDetector(nn.Module):
             embedded,
             lengths_cpu,
             batch_first=True,
-            enforce_sorted=False
+            enforce_sorted=True
         )
         
         # 4. Bidirectional LSTM Layer

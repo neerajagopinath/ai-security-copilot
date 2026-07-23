@@ -629,20 +629,16 @@ class TestGraphCodeBERTMocked:
         item = dataset[0]
         assert "labels" in item
 
-    def test_model_class_exists(self):
-        """GraphCodeBERTVulnerabilityClassifier should be importable."""
-        from src.models.graphcodebert import GraphCodeBERTVulnerabilityClassifier
-        assert GraphCodeBERTVulnerabilityClassifier is not None
+    def test_model_function_exists(self):
+        """get_graphcodebert_model should be importable."""
+        from src.models.graphcodebert import get_graphcodebert_model
+        assert get_graphcodebert_model is not None
 
-    def test_model_init_skipped_without_transformers(self):
-        """Verify that the model class has required architecture attributes."""
+    def test_model_function_signature(self):
+        """Verify that the model loader function has expected parameters."""
         import inspect
-        from src.models.graphcodebert import GraphCodeBERTVulnerabilityClassifier
-        # Verify class structure
-        assert hasattr(GraphCodeBERTVulnerabilityClassifier, '__init__')
-        assert hasattr(GraphCodeBERTVulnerabilityClassifier, 'forward')
-        # Check __init__ signature has expected parameters
-        sig = inspect.signature(GraphCodeBERTVulnerabilityClassifier.__init__)
+        from src.models.graphcodebert import get_graphcodebert_model
+        sig = inspect.signature(get_graphcodebert_model)
         params = list(sig.parameters.keys())
         assert "model_name" in params
         assert "dropout" in params

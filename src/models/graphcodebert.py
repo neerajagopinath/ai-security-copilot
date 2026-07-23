@@ -27,77 +27,33 @@ logger = logging.getLogger(__name__)
 # Model wrapper
 # ---------------------------------------------------------------------------
 
-class GraphCodeBERTVulnerabilityClassifier(nn.Module):
+def get_graphcodebert_model(
+    model_name: str = "microsoft/graphcodebert-base",
+    num_labels: int = 1,
+    dropout: float = 0.1,
+):
     """
-    Binary vulnerability classifier built on top of GraphCodeBERT
-    (microsoft/graphcodebert-base).
-
-    Architecture:
-        Source Code
-        → HuggingFace GraphCodeBERT tokenizer
-        → GraphCodeBERT transformer encoder
-        → [CLS] token representation
-        → Dropout
-        → Linear classification head
-        → Vulnerability logit (binary)
+    Returns a HuggingFace AutoModelForSequenceClassification instance.
+    This provides native support for save_pretrained() and from_pretrained().
     """
-
-    def __init__(
-        self,
-        model_name: str = "microsoft/graphcodebert-base",
-        num_labels: int = 1,
-        dropout: float = 0.1,
-        hidden_size: int = 768,
-    ) -> None:
-        super().__init__()
-        self.model_name = model_name
-        self.num_labels = num_labels
-        self.hidden_size = hidden_size
-
-        # Lazy import: only load transformers when the class is instantiated
-        try:
-            from transformers import RobertaModel
-            self.encoder = RobertaModel.from_pretrained(model_name)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Failed to load GraphCodeBERT backbone '{model_name}'. "
-                f"Ensure transformers is installed and you have an internet "
-                f"connection (or a local cache). Error: {exc}"
-            ) from exc
-
-        self.dropout = nn.Dropout(p=dropout)
-        self.classifier = nn.Linear(hidden_size, num_labels)
-
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        token_type_ids: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        """
-        Args:
-            input_ids: (batch_size, seq_len) token IDs.
-            attention_mask: (batch_size, seq_len) attention mask.
-            token_type_ids: optional token type IDs (not used by RoBERTa).
-
-        Returns:
-            logits: (batch_size, 1) raw classification logit.
-        """
-        outputs = self.encoder(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
+    from transformers import AutoModelForSequenceClassification
+    
+    logger.info("Loading GraphCodeBERT sequence classifier backbone: %s", model_name)
+    try:
+        model = AutoModelForSequenceClassification.from_pretrained(
+            model_name,
+            num_labels=num_labels,
+            hidden_dropout_prob=dropout,
+            attention_probs_dropout_prob=dropout
         )
-        # Use [CLS] token representation (first token)
-        cls_repr = outputs.last_hidden_state[:, 0, :]
-        cls_repr = self.dropout(cls_repr)
-        logits = self.classifier(cls_repr)
-        return logits
+        return model
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to load GraphCodeBERT backbone '{model_name}'. "
+            f"Ensure transformers is installed and you have an internet "
+            f"connection (or a local cache). Error: {exc}"
+        ) from exc
 
-
-# ---------------------------------------------------------------------------
-# Tokenizer loader
-# ---------------------------------------------------------------------------
 
 def load_graphcodebert_tokenizer(model_name: str = "microsoft/graphcodebert-base"):
     """
@@ -169,60 +125,61 @@ class GraphCodeBERTDataset(torch.utils.data.Dataset):
 # ---------------------------------------------------------------------------
 
 def save_graphcodebert_checkpoint(
-    model: GraphCodeBERTVulnerabilityClassifier,
+    model,
     tokenizer,
     output_dir: str,
     epoch: int,
     metrics: Dict[str, Any],
 ) -> None:
-    """Save GraphCodeBERT fine-tuned checkpoint."""
+    """Save GraphCodeBERT fine-tuned checkpoint using HuggingFace format."""
     os.makedirs(output_dir, exist_ok=True)
-    # Save model state dict
-    ckpt_path = os.path.join(output_dir, f"graphcodebert_epoch_{epoch}.pt")
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "epoch": epoch,
-            "metrics": metrics,
-            "model_name": model.model_name,
-        },
-        ckpt_path,
-    )
-    # Save tokenizer
+    
+    # Save model and tokenizer natively
+    model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
-    logger.info("Saved GraphCodeBERT checkpoint to %s", ckpt_path)
+    
+    # Save training metrics to a JSON file
+    metrics_path = os.path.join(output_dir, "training_metrics.json")
+    with open(metrics_path, "w", encoding="utf-8") as f:
+        import json
+        metrics["epoch"] = epoch
+        json.dump(metrics, f, indent=4)
+        
+    logger.info("Saved GraphCodeBERT checkpoint to %s", output_dir)
 
 
 def load_graphcodebert_checkpoint(
-    checkpoint_path: str,
-    model_name: str = "microsoft/graphcodebert-base",
+    checkpoint_dir: str,
     device: str = "cpu",
-) -> Tuple[GraphCodeBERTVulnerabilityClassifier, Dict[str, Any]]:
+) -> Tuple[Any, Dict[str, Any]]:
     """
     Load a fine-tuned GraphCodeBERT checkpoint.
 
     Args:
-        checkpoint_path: Path to .pt checkpoint file.
-        model_name: Original base model name.
+        checkpoint_dir: Path to the HuggingFace saved model directory.
         device: Target device ('cpu' or 'cuda').
 
     Returns:
-        Tuple of (model, checkpoint_dict).
+        Tuple of (model, metrics_dict).
     """
-    if not os.path.exists(checkpoint_path):
-        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    if not os.path.exists(checkpoint_dir):
+        raise FileNotFoundError(f"Checkpoint directory not found: {checkpoint_dir}")
 
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    model = GraphCodeBERTVulnerabilityClassifier(
-        model_name=checkpoint.get("model_name", model_name)
-    )
-    model.load_state_dict(checkpoint["model_state_dict"])
+    from transformers import AutoModelForSequenceClassification
+    model = AutoModelForSequenceClassification.from_pretrained(checkpoint_dir)
     model.to(device)
     model.eval()
 
+    # Attempt to load metrics if available
+    metrics = {}
+    metrics_path = os.path.join(checkpoint_dir, "training_metrics.json")
+    if os.path.exists(metrics_path):
+        import json
+        with open(metrics_path, "r", encoding="utf-8") as f:
+            metrics = json.load(f)
+
     logger.info(
-        "Loaded GraphCodeBERT checkpoint (epoch %d) from %s",
-        checkpoint.get("epoch", "?"),
-        checkpoint_path,
+        "Loaded GraphCodeBERT checkpoint from %s (epoch %s)",
+        checkpoint_dir, metrics.get("epoch", "?")
     )
-    return model, checkpoint
+    return model, metrics

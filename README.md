@@ -182,6 +182,12 @@ Training setup:
 > On CPU, one epoch over the full Devign dataset takes several hours.
 > Full fine-tuning performance is **NOT YET MEASURED — FULL GPU TRAINING REQUIRED**.
 
+### 🌟 Integrating the Colab Checkpoint
+Once you have trained the model in Google Colab (or any GPU cluster), you can seamlessly integrate it:
+1. Download the fine-tuned Hugging Face checkpoint directory from Colab (containing `config.json`, `pytorch_model.bin` or `model.safetensors`, and tokenizer files).
+2. Place the directory in your local project at: `models/checkpoints/graphcodebert_tuned` (or the path defined in `configs/config.yaml`).
+3. Restart the FastAPI server. The `ModelManager` will automatically detect the checkpoint, initialize the model using `AutoModelForSequenceClassification.from_pretrained`, and update the `/health` endpoint status to `trained`.
+
 ---
 
 ## 9. Vulnerability Analysis Workflow
@@ -367,6 +373,9 @@ python -m src.training.train_graphcodebert \
 # GraphCodeBERT smoke test (CPU-safe, 2-batch verification)
 python -m src.training.train_graphcodebert --smoke_test
 ```
+
+### Note on Multi-Model Architecture
+The API loads both Bi-LSTM and GraphCodeBERT on startup. If a model's checkpoint is missing, it gracefully degrades to `"not_tuned"` or `"fallback"` mode without crashing the server. You can check the loading status independently for each model via the `/health` endpoint or the Streamlit sidebar.
 
 ---
 

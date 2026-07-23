@@ -267,6 +267,51 @@ class ModelManager:
         )
 
     # ------------------------------------------------------------------
+    # GraphCodeBERT loading
+    # ------------------------------------------------------------------
+
+    def load_graphcodebert(self) -> None:
+        """
+        Attempt to load the fine-tuned GraphCodeBERT model from the path
+        specified in config.yaml.
+        """
+        import yaml
+        from src.models.graphcodebert import load_graphcodebert_checkpoint, load_graphcodebert_tokenizer
+        
+        # Parse config to find checkpoint directory
+        config_path = "configs/config.yaml"
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+            gcb_config = config.get("models", {}).get("graphcodebert", {})
+            tuned_dir = gcb_config.get("tuned_model_dir", "models/checkpoints/graphcodebert_tuned")
+            model_name = gcb_config.get("model_name", "microsoft/graphcodebert-base")
+        except Exception as exc:
+            logger.warning("Failed to read config.yaml for GraphCodeBERT paths: %s", exc)
+            self.graphcodebert_status = "fallback"
+            return
+            
+        if not os.path.exists(tuned_dir):
+            logger.info(
+                "Fine-tuned GraphCodeBERT checkpoint not found at %s. "
+                "Operating in fallback/untuned mode.", tuned_dir
+            )
+            self.graphcodebert_status = "not_tuned"
+            return
+            
+        try:
+            model, metrics = load_graphcodebert_checkpoint(tuned_dir, device=self.device)
+            tokenizer = load_graphcodebert_tokenizer(tuned_dir)
+            
+            self.graphcodebert_model = model
+            self.graphcodebert_tokenizer = tokenizer
+            self.graphcodebert_status = "trained"
+            logger.info("GraphCodeBERT loaded successfully (Status: trained).")
+        except Exception as exc:
+            logger.error("Failed to load GraphCodeBERT from %s: %s", tuned_dir, exc)
+            self.graphcodebert_status = "fallback"
+
+    # ------------------------------------------------------------------
     # Inference
     # ------------------------------------------------------------------
 
@@ -343,9 +388,11 @@ class ModelManager:
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
             with torch.no_grad():
-                logit = self.graphcodebert_model(
-                    inputs["input_ids"], inputs["attention_mask"]
+                outputs = self.graphcodebert_model(
+                    input_ids=inputs["input_ids"], 
+                    attention_mask=inputs["attention_mask"]
                 )
+                logit = outputs.logits
             prob = torch.sigmoid(logit).item()
             return {"probability": float(prob), "mode": self.graphcodebert_status}
         except Exception as exc:

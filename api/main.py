@@ -57,11 +57,13 @@ async def lifespan(app: FastAPI):
 
         model_manager = ModelManager()
         model_manager.load_bilstm()
+        model_manager.load_graphcodebert()
 
         analysis_service = SecurityAnalysisService(model_manager=model_manager)
 
         status = model_manager.get_status()
         logger.info("Bi-LSTM status: %s", status["bilstm"]["status"])
+        logger.info("GraphCodeBERT status: %s", status["graphcodebert"]["status"])
         logger.info("Device: %s", status["device"])
 
         if status["bilstm"]["status"] == "fallback":
@@ -202,6 +204,7 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     bilstm_status: str
+    graphcodebert_status: str
     device: str
     timestamp: float
 
@@ -243,16 +246,19 @@ async def generic_exception_handler(request: Request, exc: Exception):
 )
 async def health():
     bilstm_status = "fallback"
+    graphcodebert_status = "not_loaded"
     device_str = "cpu"
     if model_manager is not None:
         status = model_manager.get_status()
         bilstm_status = status["bilstm"]["status"]
+        graphcodebert_status = status["graphcodebert"]["status"]
         device_str = status["device"]
 
     return HealthResponse(
         status="ok",
         version="1.0.0",
         bilstm_status=bilstm_status,
+        graphcodebert_status=graphcodebert_status,
         device=device_str,
         timestamp=time.time(),
     )

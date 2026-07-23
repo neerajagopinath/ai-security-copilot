@@ -1,4 +1,17 @@
 import os
+# ── OpenMP / MKL thread policy ────────────────────────────────────────────────
+# MUST be set BEFORE torch imports any OMP/MKL library.
+# KMP_BLOCKTIME=0  : OMP worker threads yield immediately when idle instead of
+#                    busy-spinning. This helps prevent excessive CPU usage
+#                    between batches and reduces thermal throttling on
+#                    power-constrained systems.
+# OMP_WAIT_POLICY  : PASSIVE is equivalent — threads yield to OS scheduler.
+# MKL_DYNAMIC=FALSE: Disable MKL's own thread-count auto-tuning which can
+#                    override torch.set_num_threads() at runtime.
+os.environ.setdefault("KMP_BLOCKTIME", "0")
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+os.environ.setdefault("MKL_DYNAMIC", "FALSE")
+# ─────────────────────────────────────────────────────────────────────────────
 import json
 import yaml
 import time
@@ -32,6 +45,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--device', type=str, default=None, help="Override device (cpu or cuda)")
     parser.add_argument('--resume', type=str, default=None, help="Path to checkpoint to resume training from")
     parser.add_argument('--smoke_test', action='store_true', help="Execute a fast, single-batch dry-run")
+    parser.add_argument('--threads', type=int, default=None,
+                        help="CPU thread count for PyTorch. Default: auto-detected. "
+                             "Use this to limit thread usage in resource-constrained environments.")
     return parser.parse_args()
 
 def load_jsonl_data(file_path: str) -> tuple[list[list[int]], list[int], list[int]]:
@@ -123,16 +139,24 @@ def main():
         if device_name == "cuda":
             print("[Warning] CUDA was requested but is not available on this hardware. Defaulting to CPU.")
         device = torch.device("cpu")
-        
-        # Optimize CPU threads for RNN workloads (prevents severe OpenMP thread contention slowdowns)
+
+        # ── CPU thread configuration ───────────────────────────────────────────
+        # PyTorch defaults to using all logical cores. In some environments,
+        # specifying fewer threads can prevent synchronization overhead and
+        # improve overall throughput. We allow an explicit override via --threads.
         try:
-            import multiprocessing
-            cpu_count = multiprocessing.cpu_count()
-            threads = min(8, max(2, cpu_count // 2))
-            torch.set_num_threads(threads)
-        except Exception:
-            torch.set_num_threads(4)
-        
+            if args.threads is not None:
+                chosen_threads = max(1, args.threads)
+                torch.set_num_threads(chosen_threads)
+            
+            # Restrict inter-op parallelism during sequential training to save resources
+            torch.set_num_interop_threads(1)
+            
+            print(f"  CPU threads: {torch.get_num_threads()}  (interop: {torch.get_num_interop_threads()})  "
+                  f"[KMP_BLOCKTIME=0, OMP_WAIT_POLICY=PASSIVE]")
+        except Exception as e:
+            print(f"  [Warning] Could not configure CPU threads optimally: {e}")
+
     print(f"\nTraining Configured Device: {device.type.upper()}")
     if device.type == "cuda":
         print(f"  GPU Device: {torch.cuda.get_device_name(0)}")
@@ -249,7 +273,10 @@ def main():
         
         # --- TRAINING CYCLE ---
         model.train()
-        train_loss = 0.0
+        # Accumulate loss as a tensor to avoid 340 synchronisation barriers per epoch.
+        # loss.item() forces a CPU sync on every call; instead we accumulate the
+        # tensor and call .item() exactly once at the end of the epoch.
+        train_loss_tensor = torch.tensor(0.0)
         
         for batch in train_loader:
             input_ids = batch["input_ids"].to(device)
@@ -269,15 +296,18 @@ def main():
             nn.utils.clip_grad_norm_(model.parameters(), config["training"]["clip_grad_norm"])
             
             optimizer.step()
-            train_loss += loss.item() * input_ids.size(0)
-            
-        epoch_train_loss = train_loss / len(train_loader.dataset)
+            # Detach to avoid accumulating the entire computation graph
+            train_loss_tensor += loss.detach() * input_ids.size(0)
+
+        # Single CPU sync point for the entire epoch
+        epoch_train_loss = train_loss_tensor.item() / len(train_loader.dataset)
         
         # --- VALIDATION CYCLE ---
         model.eval()
-        val_loss = 0.0
+        val_loss_tensor = torch.tensor(0.0)
         all_targets = []
         all_logits = []
+
         
         with torch.no_grad():
             for batch in val_loader:
@@ -288,13 +318,14 @@ def main():
                 logits = model(input_ids, lengths).squeeze(-1)
                 loss = criterion(logits, targets)
                 
-                val_loss += loss.item() * input_ids.size(0)
+                # Accumulate as tensor — avoid per-batch .item() sync
+                val_loss_tensor = val_loss_tensor + loss.detach() * input_ids.size(0)
                 
                 # Keep on device, just append to list
                 all_targets.append(targets)
                 all_logits.append(logits)
                 
-        epoch_val_loss = val_loss / len(val_loader.dataset)
+        epoch_val_loss = val_loss_tensor.item() / len(val_loader.dataset)
         
         # Calculate metrics efficiently: concatenate once, then move to CPU
         y_true = torch.cat(all_targets).cpu().numpy()

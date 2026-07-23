@@ -38,6 +38,7 @@ models:
   
   graphcodebert:
     model_name: "microsoft/graphcodebert-base"
+    tuned_model_dir: "models/checkpoints/graphcodebert_tuned"
     max_sequence_length: 512
     fine_tune_epochs: 3
     learning_rate: 0.00002

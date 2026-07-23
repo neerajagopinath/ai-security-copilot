@@ -279,17 +279,32 @@ with st.sidebar:
         if response.status_code == 200:
             health = response.json()
             bilstm_status = health.get("bilstm_status", "unknown")
-            status_color = {
-                "trained": "dot-green",
-                "demo": "dot-yellow",
-                "fallback": "dot-red",
-            }.get(bilstm_status, "dot-gray")
+            gcb_status = health.get("graphcodebert_status", "not_loaded")
+            
+            def get_color(status):
+                return {
+                    "trained": "dot-green",
+                    "demo": "dot-yellow",
+                    "fallback": "dot-red",
+                    "not_tuned": "dot-yellow",
+                    "not_loaded": "dot-gray"
+                }.get(status, "dot-gray")
+                
             st.markdown(
-                f'<span class="status-dot {status_color}"></span>'
+                f'<span class="status-dot dot-green"></span>'
                 f'API Connected',
                 unsafe_allow_html=True,
             )
-            st.caption(f"Bi-LSTM: `{bilstm_status}` | Device: `{health.get('device', 'cpu')}`")
+            st.caption(f"Device: `{health.get('device', 'cpu')}`")
+            
+            st.markdown("**Models**")
+            st.markdown(
+                f'<span class="status-dot {get_color(bilstm_status)}"></span>'
+                f'<span style="font-size:0.85rem">Bi-LSTM: <code>{bilstm_status}</code></span><br>'
+                f'<span class="status-dot {get_color(gcb_status)}"></span>'
+                f'<span style="font-size:0.85rem">GraphCodeBERT: <code>{gcb_status}</code></span>',
+                unsafe_allow_html=True,
+            )
         else:
             st.error("API responded with error")
     except requests.exceptions.ConnectionError:
