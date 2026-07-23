@@ -42,6 +42,12 @@ models:
     max_sequence_length: 512
     fine_tune_epochs: 3
     learning_rate: 0.00002
+    seed: 42
+    num_workers: 4
+    pin_memory: true
+    mixed_precision: true
+    warmup_ratio: 0.1
+    resume_from: null
 
 fastapi:
   host: "127.0.0.1"
