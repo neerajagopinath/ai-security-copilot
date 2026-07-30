@@ -61,15 +61,13 @@ async def lifespan(app: FastAPI):
 
         analysis_service = SecurityAnalysisService(model_manager=model_manager)
 
-        status = model_manager.get_status()
-        logger.info("Bi-LSTM status: %s", status["bilstm"]["status"])
-        logger.info("GraphCodeBERT status: %s", status["graphcodebert"]["status"])
-        logger.info("Device: %s", status["device"])
+        # Emit a structured startup summary for both models
+        model_manager.log_startup_summary()
 
-        if status["bilstm"]["status"] == "fallback":
+        if model_manager.get_status()["bilstm"]["status"] == "fallback":
             logger.warning(
-                "No trained checkpoint found. Operating in rule-based fallback mode. "
-                "Run training to generate a checkpoint."
+                "No trained Bi-LSTM checkpoint found. "
+                "Operating in rule-based fallback mode."
             )
 
     except Exception as exc:

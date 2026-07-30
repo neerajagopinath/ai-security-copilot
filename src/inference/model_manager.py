@@ -274,10 +274,15 @@ class ModelManager:
         """
         Attempt to load the fine-tuned GraphCodeBERT model from the path
         specified in config.yaml.
+
+        Sets graphcodebert_status to:
+          - "trained"  : fine-tuned checkpoint found and loaded successfully.
+          - "not_tuned": directory not present (training not yet done).
+          - "fallback" : directory present but loading failed.
         """
         import yaml
         from src.models.graphcodebert import load_graphcodebert_checkpoint, load_graphcodebert_tokenizer
-        
+
         # Parse config to find checkpoint directory
         config_path = "configs/config.yaml"
         try:
@@ -290,25 +295,44 @@ class ModelManager:
             logger.warning("Failed to read config.yaml for GraphCodeBERT paths: %s", exc)
             self.graphcodebert_status = "fallback"
             return
-            
+
         if not os.path.exists(tuned_dir):
             logger.info(
-                "Fine-tuned GraphCodeBERT checkpoint not found at %s. "
-                "Operating in fallback/untuned mode.", tuned_dir
+                "GraphCodeBERT: fine-tuned checkpoint not found at '%s'. "
+                "Status: not_tuned (rule-based fallback active).", tuned_dir
             )
             self.graphcodebert_status = "not_tuned"
             return
-            
+
         try:
-            model, metrics = load_graphcodebert_checkpoint(tuned_dir, device=self.device)
+            # Pass device as string for compatibility with from_pretrained map_location
+            device_str = str(self.device)
+            model, metrics = load_graphcodebert_checkpoint(tuned_dir, device=device_str)
             tokenizer = load_graphcodebert_tokenizer(tuned_dir)
-            
+
             self.graphcodebert_model = model
             self.graphcodebert_tokenizer = tokenizer
             self.graphcodebert_status = "trained"
-            logger.info("GraphCodeBERT loaded successfully (Status: trained).")
+
+            epoch = metrics.get("epoch", "?")
+            val_f1 = metrics.get("val_f1", None)
+            val_auc = metrics.get("val_auc", None)
+            logger.info(
+                "[OK] GraphCodeBERT fine-tuned model loaded.\n"
+                "  Status    : trained\n"
+                "  Directory : %s\n"
+                "  Epoch     : %s\n"
+                "  Val F1    : %s\n"
+                "  Val AUC   : %s",
+                tuned_dir, epoch,
+                f"{val_f1:.4f}" if val_f1 is not None else "n/a",
+                f"{val_auc:.4f}" if val_auc is not None else "n/a",
+            )
         except Exception as exc:
-            logger.error("Failed to load GraphCodeBERT from %s: %s", tuned_dir, exc)
+            logger.error(
+                "GraphCodeBERT: failed to load checkpoint from '%s': %s",
+                tuned_dir, exc
+            )
             self.graphcodebert_status = "fallback"
 
     # ------------------------------------------------------------------
@@ -371,9 +395,12 @@ class ModelManager:
             return {"probability": 0.0, "mode": "fallback"}
 
     def _predict_graphcodebert(self, code: str) -> Dict[str, Any]:
-        """Run GraphCodeBERT inference (requires loaded model)."""
+        """Run GraphCodeBERT inference on a raw code string."""
         if self.graphcodebert_model is None:
-            logger.warning("GraphCodeBERT not loaded. Returning fallback.")
+            logger.warning(
+                "GraphCodeBERT requested but not loaded (status=%s). "
+                "Returning fallback probability.", self.graphcodebert_status
+            )
             return {"probability": 0.0, "mode": "fallback"}
 
         try:
@@ -389,10 +416,12 @@ class ModelManager:
 
             with torch.no_grad():
                 outputs = self.graphcodebert_model(
-                    input_ids=inputs["input_ids"], 
+                    input_ids=inputs["input_ids"],
                     attention_mask=inputs["attention_mask"]
                 )
-                logit = outputs.logits
+                # outputs.logits shape: (batch_size, num_labels) = (1, 1)
+                # Squeeze to scalar before sigmoid to be explicit and safe
+                logit = outputs.logits.squeeze()
             prob = torch.sigmoid(logit).item()
             return {"probability": float(prob), "mode": self.graphcodebert_status}
         except Exception as exc:
@@ -400,7 +429,7 @@ class ModelManager:
             return {"probability": 0.0, "mode": "fallback"}
 
     def get_status(self) -> Dict[str, Any]:
-        """Return current model loading status."""
+        """Return current model loading status for both models."""
         return {
             "bilstm": {
                 "status": self.bilstm_status,
@@ -415,20 +444,70 @@ class ModelManager:
             "device": str(self.device),
         }
 
-    def list_available_models(self):
-        """Return list of available model identifiers."""
-        bilstm_desc = (
-            "Bi-LSTM Demo Model — 2-Epoch Demo Checkpoint. "
-            "Trained on a 32-sample subset for pipeline verification only. "
-            "NOT a fully trained production model."
-            if self.bilstm_status == "demo"
-            else (
-                "Bidirectional LSTM trained on the Devign C/C++ dataset."
-                if self.bilstm_status == "trained"
-                else "No checkpoint loaded. Rule-based analysis only."
-            )
+    def log_startup_summary(self) -> None:
+        """Emit a structured summary of both model loading outcomes at startup."""
+        sep = "=" * 60
+        logger.info(sep)
+        logger.info("Model Loading Summary")
+        logger.info(sep)
+
+        # Bi-LSTM
+        bilstm_symbols = {"trained": "✓", "demo": "~", "fallback": "✗"}
+        bilstm_sym = bilstm_symbols.get(self.bilstm_status, "?")
+        logger.info(
+            "  [%s] Bi-LSTM          : %s  |  checkpoint: %s",
+            bilstm_sym,
+            self.bilstm_status.upper(),
+            self.bilstm_checkpoint_path or "none",
         )
-        models = [
+
+        # GraphCodeBERT
+        gcb_symbols = {"trained": "✓", "not_tuned": "~", "not_loaded": "~", "fallback": "✗"}
+        gcb_sym = gcb_symbols.get(self.graphcodebert_status, "?")
+        logger.info(
+            "  [%s] GraphCodeBERT     : %s",
+            gcb_sym,
+            self.graphcodebert_status.upper(),
+        )
+
+        logger.info("  Device               : %s", str(self.device).upper())
+
+        if self.bilstm_status == "fallback" and self.graphcodebert_status in ("not_tuned", "not_loaded", "fallback"):
+            logger.warning("  Both ML models unavailable — rule-based analysis only.")
+        elif self.graphcodebert_status != "trained":
+            logger.info("  GraphCodeBERT not fine-tuned — Bi-LSTM is the active ML model.")
+
+        logger.info(sep)
+
+    def list_available_models(self):
+        """Return list of available model identifiers with accurate runtime descriptions."""
+        # Bi-LSTM description reflects actual loaded status
+        if self.bilstm_status == "demo":
+            bilstm_desc = (
+                "Bi-LSTM Demo Model — 2-Epoch Demo Checkpoint. "
+                "Trained on a 32-sample subset for pipeline verification only. "
+                "NOT a fully trained production model."
+            )
+        elif self.bilstm_status == "trained":
+            bilstm_desc = "Bidirectional LSTM trained on the Devign C/C++ dataset."
+        else:
+            bilstm_desc = "No checkpoint loaded. Rule-based analysis only."
+
+        # GraphCodeBERT description reflects actual loaded status
+        if self.graphcodebert_status == "trained":
+            gcb_desc = (
+                "GraphCodeBERT fine-tuned on the Devign C/C++ dataset. "
+                "Transformer-based model (microsoft/graphcodebert-base)."
+            )
+        elif self.graphcodebert_status in ("not_tuned", "not_loaded"):
+            gcb_desc = (
+                "GraphCodeBERT backbone available but not yet fine-tuned. "
+                "Run Colab training and place checkpoint in models/checkpoints/graphcodebert_tuned/."
+            )
+        else:
+            gcb_desc = "GraphCodeBERT failed to load. Check logs."
+
+        return [
             {
                 "id": "bilstm",
                 "name": "Bi-LSTM Vulnerability Detector",
@@ -439,11 +518,6 @@ class ModelManager:
                 "id": "graphcodebert",
                 "name": "GraphCodeBERT (microsoft/graphcodebert-base)",
                 "status": self.graphcodebert_status,
-                "description": (
-                    "Transformer-based model pre-trained on code. "
-                    "Requires GPU fine-tuning for full performance. "
-                    "NOT YET FINE-TUNED — GPU training required."
-                ),
+                "description": gcb_desc,
             },
         ]
-        return models

@@ -63,6 +63,11 @@ models/checkpoints/latest_checkpoint.pt
 models/saved/*.pt
 models/saved/*.bin
 
+# GraphCodeBERT fine-tuned weights (large — reproduce via training)
+# Config, tokenizer, and metrics files ARE tracked (small).
+models/checkpoints/graphcodebert_tuned/model.safetensors
+models/checkpoints/graphcodebert_tuned/pytorch_model.bin
+
 # HuggingFace model cache (very large)
 .cache/huggingface/
 ~/.cache/huggingface/

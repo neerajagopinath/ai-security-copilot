@@ -153,11 +153,15 @@ def load_graphcodebert_checkpoint(
     device: str = "cpu",
 ) -> Tuple[Any, Dict[str, Any]]:
     """
-    Load a fine-tuned GraphCodeBERT checkpoint.
+    Load a fine-tuned GraphCodeBERT checkpoint from a HuggingFace directory.
 
     Args:
-        checkpoint_dir: Path to the HuggingFace saved model directory.
-        device: Target device ('cpu' or 'cuda').
+        checkpoint_dir: Path to the HuggingFace saved model directory
+                        (must contain config.json and model weights).
+        device: Target device — accepts a string ('cpu', 'cuda', 'cuda:0')
+                or a torch.device object.  The model is loaded to CPU first
+                (the transformers default) then moved to the target device via
+                model.to(), which is compatible with all transformers versions.
 
     Returns:
         Tuple of (model, metrics_dict).
@@ -166,12 +170,20 @@ def load_graphcodebert_checkpoint(
         raise FileNotFoundError(f"Checkpoint directory not found: {checkpoint_dir}")
 
     from transformers import AutoModelForSequenceClassification
+
+    # Normalise device to string so model.to() always works regardless of
+    # whether the caller passed a str or a torch.device object.
+    device_str = str(device)
+
+    # Load weights onto CPU first (transformers default), then move to target
+    # device.  This avoids the device_map parameter which requires accelerate
+    # and does not support "cpu" as a valid value.
     model = AutoModelForSequenceClassification.from_pretrained(checkpoint_dir)
-    model.to(device)
+    model.to(device_str)
     model.eval()
 
-    # Attempt to load metrics if available
-    metrics = {}
+    # Load training metrics if available
+    metrics: Dict[str, Any] = {}
     metrics_path = os.path.join(checkpoint_dir, "training_metrics.json")
     if os.path.exists(metrics_path):
         import json
