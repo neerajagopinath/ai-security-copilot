@@ -180,13 +180,75 @@ Training setup:
 
 > ⚠️ **GPU Requirement**: GraphCodeBERT requires a GPU for practical fine-tuning.
 > On CPU, one epoch over the full Devign dataset takes several hours.
-> Full fine-tuning performance is **NOT YET MEASURED — FULL GPU TRAINING REQUIRED**.
 
 ### 🌟 Integrating the Colab Checkpoint
 Once you have trained the model in Google Colab (or any GPU cluster), you can seamlessly integrate it:
 1. Download the fine-tuned Hugging Face checkpoint directory from Colab (containing `config.json`, `pytorch_model.bin` or `model.safetensors`, and tokenizer files).
 2. Place the directory in your local project at: `models/checkpoints/graphcodebert_tuned` (or the path defined in `configs/config.yaml`).
 3. Restart the FastAPI server. The `ModelManager` will automatically detect the checkpoint, initialize the model using `AutoModelForSequenceClassification.from_pretrained`, and update the `/health` endpoint status to `trained`.
+
+---
+
+## 8a. GraphCodeBERT Checkpoint
+
+The repository intentionally does **not** include the trained `model.safetensors` weight file. At ~476 MB it exceeds GitHub's 100 MB per-file limit and is excluded from version control via `.gitignore`.
+
+All other checkpoint files (model config, tokenizer, tokenizer config, and training metrics) **are** committed to Git and will be present after cloning.
+
+### Expected directory structure
+
+```
+models/
+└── checkpoints/
+    └── graphcodebert_tuned/
+        ├── config.json              ✅ committed
+        ├── tokenizer.json           ✅ committed
+        ├── tokenizer_config.json    ✅ committed
+        ├── training_history.json    ✅ committed
+        ├── training_metrics.json    ✅ committed
+        └── model.safetensors        ❌ NOT in Git — must be provided separately
+```
+
+> ⚠️ Without `model.safetensors`, the GraphCodeBERT model **cannot** be loaded for inference.
+> The API will start successfully but GraphCodeBERT status will remain `"not_tuned"` instead of `"trained"`.
+
+### How to obtain `model.safetensors`
+
+#### Option 1 — Use the existing fine-tuned weights (recommended)
+
+If you have access to the `model.safetensors` file produced during the Colab fine-tuning session:
+
+1. Copy the file into the checkpoint directory:
+   ```
+   models/checkpoints/graphcodebert_tuned/model.safetensors
+   ```
+2. Restart the FastAPI server. The `ModelManager` will automatically detect and load it.
+3. Confirm via `/health` — `graphcodebert_status` should read `"trained"`.
+
+#### Option 2 — Retrain GraphCodeBERT
+
+If the original weights are unavailable, retrain using the existing pipeline:
+
+```bash
+# Requires a CUDA-capable GPU and the raw Devign parquet files in data/raw/
+python -m src.training.train_graphcodebert \
+    --train_path data/raw/train-00000-of-00001.parquet \
+    --val_path data/raw/validation-00000-of-00001.parquet \
+    --output_dir models/checkpoints/graphcodebert_tuned \
+    --epochs 3 \
+    --batch_size 16 \
+    --device cuda
+```
+
+After training completes, `model.safetensors` will be written to `models/checkpoints/graphcodebert_tuned/` automatically.
+
+### Running without `model.safetensors`
+
+The application degrades gracefully. If the weight file is absent:
+- FastAPI starts normally — the server does not crash.
+- Bi-LSTM inference continues to work.
+- GraphCodeBERT requests fall back to `"not_tuned"` mode.
+- The `/health` and `/models` endpoints report the status accurately.
 
 ---
 
@@ -301,6 +363,11 @@ source .venv/bin/activate
 # 3. Install dependencies
 pip install -r requirements.txt
 ```
+
+> 📌 **GraphCodeBERT note**: If you intend to run GraphCodeBERT inference, you must also place
+> `model.safetensors` in `models/checkpoints/graphcodebert_tuned/` before starting the API.
+> See [Section 8a — GraphCodeBERT Checkpoint](#8a-graphcodebert-checkpoint) for full instructions.
+> Bi-LSTM inference and all other functionality work without this file.
 
 ---
 
@@ -489,17 +556,29 @@ python -m pytest tests/ -v --cov=src --cov=api
 |---|---|---|
 | Bi-LSTM (demo) | ✅ Demo checkpoint available | 2-epoch, 32-sample smoke run |
 | Bi-LSTM (full) | ⏳ Not yet trained | Requires GPU training on full dataset |
-| GraphCodeBERT | ⏳ Not yet fine-tuned | Requires GPU |
+| GraphCodeBERT | ✅ Fine-tuned (2 epochs, Devign) | Val F1: 0.619, Val AUC: 0.728 |
 
-### Genuine Metrics Available
+### Genuine Metrics — GraphCodeBERT (2-Epoch Fine-Tune on Devign)
+
+| Metric | Value |
+|---|---|
+| Epochs trained | 2 (best checkpoint) |
+| Val Accuracy | 64.6% |
+| Val Precision | 58.1% |
+| Val Recall | 66.4% |
+| Val F1 | 61.9% |
+| Val AUC | 72.8% |
+
+> These metrics reflect the committed fine-tuned checkpoint. The weight file (`model.safetensors`)
+> is not stored in Git — see [Section 8a](#8a-graphcodebert-checkpoint).
+
+### Bi-LSTM Metrics
 
 > **NOT YET MEASURED — FULL GPU TRAINING REQUIRED**
 
 The demo checkpoint was trained for only 2 epochs on 32 samples for pipeline verification. Its metrics are NOT representative of model capability.
 
-Full Bi-LSTM training on the complete Devign dataset (GPU, 10 epochs) is expected to yield results competitive with published baselines (~60-70% F1).
-
-GraphCodeBERT fine-tuning (GPU, 3 epochs) is expected to yield results approaching state-of-the-art (~70-75% F1 based on published literature).
+Full Bi-LSTM training on the complete Devign dataset (GPU, 10 epochs) is expected to yield results competitive with published baselines (~60–70% F1).
 
 ---
 
