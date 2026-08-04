@@ -259,59 +259,114 @@ with st.sidebar:
         help="Select the programming language of your code snippet.",
     )
 
+    # ── Dynamic model list from GET /models ──────────────────────────────────
+    # Fetch available models from the backend so the dropdown automatically
+    # reflects every model the API has loaded — no frontend changes needed
+    # when a new model is added.
+    def _fetch_models():
+        """Return list of (id, display_label) tuples from GET /models.
+        Falls back to a minimal static list if the API is unreachable."""
+        try:
+            resp = requests.get(f"{API_BASE_URL}/models", timeout=3)
+            if resp.status_code == 200:
+                models = resp.json()
+                result = []
+                for m in models:
+                    model_id = m.get("id", "")
+                    model_name = m.get("name", model_id)
+                    status = m.get("status", "")
+                    # Build a concise label: name + status badge
+                    status_tag = {
+                        "trained": "✅ Trained",
+                        "demo":    "⚗️ Demo",
+                        "fallback":"⚠️ Unavailable",
+                        "not_tuned": "⏳ Not fine-tuned",
+                        "not_loaded": "⏳ Not loaded",
+                    }.get(status, status)
+                    icon = "🧠" if "lstm" in model_id.lower() else "🤖"
+                    result.append((model_id, f"{icon} {model_name} — {status_tag}"))
+                if result:
+                    return result
+        except Exception:
+            pass
+        # Fallback if API is down — keeps the dropdown usable
+        return [
+            ("bilstm",        "🧠 Bi-LSTM Vulnerability Detector"),
+            ("graphcodebert", "🤖 GraphCodeBERT"),
+        ]
+
+    available_models = _fetch_models()
+    model_ids    = [m[0] for m in available_models]
+    model_labels = [m[1] for m in available_models]
+
     model_choice = st.selectbox(
         "Analysis Model",
-        ["bilstm", "graphcodebert"],
+        options=model_ids,
+        format_func=lambda x: model_labels[model_ids.index(x)],
         index=0,
-        format_func=lambda x: {
-            "bilstm": "🧠 Bi-LSTM (Demo Checkpoint)",
-            "graphcodebert": "🤖 GraphCodeBERT (GPU Required)",
-        }[x],
-        help="Select the ML model for vulnerability detection.",
+        help="Models are loaded from the API. Both Bi-LSTM and GraphCodeBERT are available.",
     )
 
     st.markdown("---")
 
-    # API status check
+    # ── API Status Panel ──────────────────────────────────────────────────────
     st.markdown("### 🔌 API Status")
     try:
         response = requests.get(f"{API_BASE_URL}/health", timeout=3)
         if response.status_code == 200:
             health = response.json()
             bilstm_status = health.get("bilstm_status", "unknown")
-            gcb_status = health.get("graphcodebert_status", "not_loaded")
-            
-            def get_color(status):
-                return {
-                    "trained": "dot-green",
-                    "demo": "dot-yellow",
-                    "fallback": "dot-red",
-                    "not_tuned": "dot-yellow",
-                    "not_loaded": "dot-gray"
+            gcb_status    = health.get("graphcodebert_status", "not_loaded")
+            device        = health.get("device", "cpu").upper()
+
+            def _dot(status):
+                colour = {
+                    "trained":    "dot-green",
+                    "demo":       "dot-yellow",
+                    "fallback":   "dot-red",
+                    "not_tuned":  "dot-yellow",
+                    "not_loaded": "dot-gray",
                 }.get(status, "dot-gray")
-                
+                return f'<span class="status-dot {colour}"></span>'
+
+            def _fmt(status):
+                """Human-readable status string."""
+                return {
+                    "trained":    "Trained",
+                    "demo":       "Demo",
+                    "fallback":   "Unavailable",
+                    "not_tuned":  "Not fine-tuned",
+                    "not_loaded": "Not loaded",
+                    "unknown":    "Unknown",
+                }.get(status, status.capitalize())
+
             st.markdown(
                 f'<span class="status-dot dot-green"></span>'
-                f'API Connected',
+                '<strong style="color:#4ade80;">API Connected</strong>',
                 unsafe_allow_html=True,
             )
-            st.caption(f"Device: `{health.get('device', 'cpu')}`")
-            
-            st.markdown("**Models**")
             st.markdown(
-                f'<span class="status-dot {get_color(bilstm_status)}"></span>'
-                f'<span style="font-size:0.85rem">Bi-LSTM: <code>{bilstm_status}</code></span><br>'
-                f'<span class="status-dot {get_color(gcb_status)}"></span>'
-                f'<span style="font-size:0.85rem">GraphCodeBERT: <code>{gcb_status}</code></span>',
+                f"<div style='font-family:monospace; font-size:0.82rem; "
+                f"margin-top:0.5rem; line-height:1.9;'>"
+                f"{_dot(bilstm_status)}"
+                f"Bi-LSTM &nbsp;{'&nbsp;' * 8} <code>{_fmt(bilstm_status)}</code><br>"
+                f"{_dot(gcb_status)}"
+                f"GraphCodeBERT &nbsp; <code>{_fmt(gcb_status)}</code><br>"
+                f"<span class='status-dot dot-gray'></span>"
+                f"Device &nbsp;{'&nbsp;' * 9} <code>{device}</code>"
+                f"</div>",
                 unsafe_allow_html=True,
             )
         else:
-            st.error("API responded with error")
+            st.error(f"❌ API responded with HTTP {response.status_code}")
     except requests.exceptions.ConnectionError:
         st.error("❌ API not reachable")
-        st.caption("Start API: `uvicorn api.main:app --reload`")
-    except Exception:
-        st.warning("⚠️ API status unknown")
+        st.caption("Start API:")
+        st.code("uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload", language="bash")
+    except requests.exceptions.Timeout:
+        st.warning("⚠️ API status check timed out")
+    except Exception as exc:
+        st.warning(f"⚠️ API status unknown: {exc}")
 
     st.markdown("---")
     st.markdown("### 📖 About")
@@ -320,6 +375,7 @@ with st.sidebar:
         **AI Security Copilot** detects potential vulnerabilities
         in source code using:
         - 🧠 **Bi-LSTM** trained on Devign dataset
+        - 🤖 **GraphCodeBERT** fine-tuned on Devign dataset
         - 📋 **Rule-based** security pattern detection
         - 💡 **Secure fix** suggestions
 
@@ -447,14 +503,27 @@ if analyze_clicked:
                     disclaimer = result.get("disclaimer", "")
                     model_mode = result.get("model_mode", "fallback")
 
+                    overall_assessment = result.get("overall_assessment", prediction)
+
                     # ---------------------
                     # Main result card
                     # ---------------------
-                    is_vuln = prediction == "Potentially Vulnerable"
-                    card_class = "vuln-card" if is_vuln else "safe-card"
-                    prediction_icon = "🚨" if is_vuln else "✅"
-                    prediction_color = "#ef4444" if is_vuln else "#22c55e"
-                    badge_class = "badge-red" if is_vuln else "badge-green"
+                    if "🔴" in overall_assessment:
+                        card_class = "vuln-card"
+                        oa_color = "#ef4444"
+                    elif "🟠" in overall_assessment:
+                        card_class = "vuln-card"
+                        oa_color = "#f97316"
+                    elif "🟡" in overall_assessment:
+                        card_class = "safe-card"
+                        oa_color = "#eab308"
+                    else:
+                        card_class = "safe-card"
+                        oa_color = "#22c55e"
+
+                    is_ml_vuln = prediction == "Potentially Vulnerable"
+                    ml_color = "#ef4444" if is_ml_vuln else "#22c55e"
+                    ml_badge = "badge-red" if is_ml_vuln else "badge-green"
 
                     mode_labels = {
                         "trained": ("🎓 Trained Model", "badge-green"),
@@ -467,30 +536,24 @@ if analyze_clicked:
 
                     st.markdown(f"""
                     <div class="result-card {card_class}">
+                        <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Overall Security Assessment</div>
                         <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                             <div>
-                                <span style="font-size:1.6rem;">{prediction_icon}</span>
-                                <span style="font-size:1.3rem; font-weight:700; color:{prediction_color}; margin-left:8px;">
-                                    {prediction}
-                                </span>
-                            </div>
-                            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                                <span class="metric-badge {badge_class}">{prediction}</span>
-                                <span class="metric-badge {mode_badge}">{mode_label}</span>
+                                <span style="font-size:1.4rem; font-weight:700; color:{oa_color};">{overall_assessment}</span>
                             </div>
                         </div>
-                        <div style="margin-top:1rem; display:flex; gap:2rem; flex-wrap:wrap;">
+                        <div style="margin-top:1.2rem; padding-top:1.2rem; border-top:1px solid rgba(255,255,255,0.05); display:flex; gap:2rem; flex-wrap:wrap;">
                             <div>
-                                <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:0.5px;">Vulnerability Probability</div>
-                                <div style="font-size:1.5rem; font-weight:700; color:{prediction_color};">{prob:.1%}</div>
+                                <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:0.5px;">ML Prediction</div>
+                                <div style="display:flex; align-items:center; margin-top:4px; gap:8px;">
+                                    <span style="font-size:1.1rem; font-weight:600; color:{ml_color};">{prediction}</span>
+                                    <span class="metric-badge {ml_badge}">Prob: {prob:.1%}</span>
+                                    <span class="metric-badge {mode_badge}">{mode_label}</span>
+                                </div>
                             </div>
                             <div>
-                                <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:0.5px;">Confidence</div>
-                                <div style="font-size:1.5rem; font-weight:700; color:#94a3b8;">{confidence:.1%}</div>
-                            </div>
-                            <div>
-                                <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:0.5px;">Potential Category</div>
-                                <div style="font-size:1rem; font-weight:600; color:#e2e8f0; margin-top:4px;">{category}</div>
+                                <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:0.5px;">Rule-Based Findings</div>
+                                <div style="font-size:1.1rem; font-weight:600; color:#e2e8f0; margin-top:4px;">{len(structured_findings)} detected</div>
                             </div>
                         </div>
                     </div>

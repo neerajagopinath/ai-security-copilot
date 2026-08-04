@@ -184,6 +184,7 @@ class StructuredFinding(BaseModel):
 class AnalyzeResponse(BaseModel):
     model: str
     language: str
+    overall_assessment: str
     prediction: str
     vulnerability_probability: float
     confidence: float

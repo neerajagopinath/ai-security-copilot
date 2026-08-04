@@ -164,6 +164,9 @@ class AnalysisResult:
     # Input metadata
     language: str
     model_used: str
+    
+    # Overall security assessment (combines ML and Rules)
+    overall_assessment: str
 
     # ML model output
     prediction: str           # "Potentially Vulnerable" or "No Vulnerability Detected"
@@ -446,6 +449,21 @@ class SecurityAnalysisService:
         else:
             potential_category = "No Specific Pattern Identified"
 
+        # 5b. Overall Security Assessment
+        ml_vuln = (prediction == "Potentially Vulnerable")
+        has_high = any(m.severity == "High" for m in rule_matches)
+        has_medium = any(m.severity == "Medium" for m in rule_matches)
+        has_low = any(m.severity == "Low" for m in rule_matches)
+
+        if ml_vuln or has_high:
+            overall_assessment = "🔴 Vulnerability Detected"
+        elif has_medium:
+            overall_assessment = "🟠 Potential Vulnerability Detected"
+        elif has_low:
+            overall_assessment = "🟡 Review Recommended"
+        else:
+            overall_assessment = "🟢 No Vulnerability Detected"
+
         # 6. Explanation
         explanation = self._build_explanation(
             prediction, ml_prob, rule_matches, model_mode
@@ -473,6 +491,7 @@ class SecurityAnalysisService:
         return {
             "model": model_name,
             "language": language,
+            "overall_assessment": overall_assessment,
             "prediction": prediction,
             "vulnerability_probability": round(final_prob, 4),
             "confidence": round(confidence, 4),
@@ -563,6 +582,7 @@ class SecurityAnalysisService:
         return {
             "model": model_name,
             "language": language,
+            "overall_assessment": "🟢 No Vulnerability Detected",
             "prediction": "No Vulnerability Detected",
             "vulnerability_probability": 0.0,
             "confidence": 1.0,
